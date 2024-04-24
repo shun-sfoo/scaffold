@@ -85,7 +85,7 @@ inline void output_log(log_level lev, std::string msg, std::source_location cons
   if (g_log_file) {
     g_log_file << msg + '\n';
   }
-  if (lev > g_max_level) {
+  if (lev >= g_max_level) {
     std::cout << LEPTLOG_IF_HAS_ANSI_COLORS(k_level_ansi_colors[static_cast<std::uint8_t>(lev)] +)
                          msg LEPTLOG_IF_HAS_ANSI_COLORS(+k_reset_ansi_color) +
                      '\n';
