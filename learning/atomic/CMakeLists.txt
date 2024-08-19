@@ -1,0 +1,6 @@
+add_compile_options(-Wall -Wextra -Werror=return-type)
+file(GLOB sources "*.cpp")
+foreach(source IN LISTS sources)
+    get_filename_component(name ${source} NAME_WE)
+    add_executable(${name} ${source})
+endforeach()
