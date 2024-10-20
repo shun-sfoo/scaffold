@@ -11,6 +11,7 @@
 #include <clocale>
 #include <cstring>
 #include <string>
+#include <vector>
 
 #define CHECK_ALL(func, ...) check_error(#func, func(__VA_ARGS__))
 
@@ -94,25 +95,68 @@ struct address_resolver {
   }
 };
 
+struct http_request_parse {
+  std::string m_header;
+  std::string m_body;
+  bool m_header_finished = false;
+  bool m_body_finished = false;
+
+  [[nodiscard]] bool need_more_chunks() const {
+    return !m_body_finished; // 正文结束了， 不再需要更多数据
+  }
+
+  void push_chunk(std::string_view chunk) {
+    if (!m_header_finished) {
+      m_header.append(chunk);
+      // 如果还在解析头部的话，尝试判断头部是否结束
+      size_t header_len = m_header.find("\r\n\r\n");
+      if (header_len != std::string::npos) {
+        // 头部已经结束
+        m_header_finished = true;
+        // 把不小心多读取的正文留下
+        m_body = m_header.substr(header_len);
+        m_header.resize(header_len);
+        // TODO: 分析头部中的 Content-length 字段
+        // TODO: 暂时认为没有正文
+        m_body_finished = true;
+      }
+    } else {
+      m_body.append(chunk);
+    }
+  }
+};
+
+std::vector<std::thread> pool;
+
 int main() {
   // setlocale(LC_ALL, "zh_CN.UTF-8");
   address_resolver resolver;
+  fmt::println("正在监听：127.0.0.1:8080");
   auto entry = resolver.resolve("127.0.0.1", "8080");
   int listenfd = entry.create_socket_and_bind();
   CHECK_ALL(listen, listenfd, SOMAXCONN);
   while (true) {
     socket_address_storage addr;
     int connid = CHECK_ALL(accept, listenfd, &addr.m_addr, &addr.m_addrlen);
-    std::thread([connid] {
+    pool.emplace_back([connid] {
       char buf[1024];
-      size_t n = CHECK_ALL(read, connid, buf, sizeof(buf));
-      auto req = std::string(buf, n);
-      fmt::println("request: {}", req);
-      std::string res = "你好 ! " + req;
+      http_request_parse req_parse;
+      do {
+        size_t n = CHECK_ALL(read, connid, buf, sizeof(buf));
+        req_parse.push_chunk(std::string_view(buf, n));
+      } while (req_parse.need_more_chunks());
+      std::string req = req_parse.m_header;
+      fmt::println("收到请求: {}", req);
+      std::string res = "HTTP/1.1 200 OK\r\nServer: co_http\r\nConnection: close\r\nContent-length: 5\r\n\r\nHello";
       fmt::println("response: {}", res);
       CHECK_ALL(write, connid, res.data(), res.size());
       close(connid);
-    }).detach();
+    });
   }
+
+  for (auto &t : pool) {
+    t.join();
+  }
+
   return 0;
 }
